@@ -8,191 +8,202 @@ from selenium.webdriver.support import expected_conditions as EC
 import requests
 from bs4 import BeautifulSoup
 import time
-import pandas as pd
 import fuzzy
 import unidecode
+from sentence_transformers import SentenceTransformer, util
 
-def normalize_word(word):
-    return unidecode.unidecode(word)
+def normalizeWord(word):
+    return unidecode.unidecode(word)    #convert our code with respect to the ASCII code 
 
-def get_soundex(word):
+def getSoundex(word):
     soundex = fuzzy.Soundex(4)
-    normalized_word = normalize_word(word)
-    return soundex(normalized_word)
+    normalizedWord = normalizeWord(word)      #set our word to the normalized word
+    return soundex(normalizedWord)
 
-def soundex_similarity(soundex1, soundex2):
-    if soundex1 == soundex2:
+def soundexSimilarity(soundex1, soundex2):
+    if soundex1 == soundex2:            #check our name is similiar to the our search quary
         return True
-    elif soundex1[:30] == soundex2[:30]:  # İlk 30 karakteri kontrol et
+    elif soundex1[:30] == soundex2[:30]:  # control first 30 cases
         return True
     else:
         return False
 
-def isim_ayikla(new_name, isimler):
-    if new_name not in isimler:
-        isimler.append(new_name)
+def extractName(newName, names):
+    if newName not in names:
+        names.append(newName)        #clean out our name list 
         return True
     return False
 
-def contains_all_query_words(product_name, query_words):
-    product_name = product_name.lower()
-    return all(word in product_name for word in query_words)
+def containsAllQueryWords(productName, queryWords):
+    productName = productName.lower()                     #check if the quary word is in the found word
+    return all(word in productName for word in queryWords)
 
-def islemler33(search_query):
+def operations33(searchQuery):
+
+    #start chrome web driver
     options = webdriver.ChromeOptions()
-    options.add_argument("--disable-notifications")
-    service = Service("/Users/mehmethakanguven/Desktop/Visual_Studio/chromedriver")
+    options.add_argument("--disable-notifications")     #disable notifications
+    service = Service("/Users/mehmethakanguven/Desktop/Visual_Studio/chromedriver")     #enter webdriver locaiton
     #options.add_argument('--headless')  
-    #options.add_argument('--disable-gpu')
+    #options.add_argument('--disable-gpu')      #for our webdriver work at background
     #options.add_argument('--no-sandbox')
     #huoptions.add_argument('--disable-dev-shm-usage')
     driver = webdriver.Chrome(service=service, options=options)
 
-    target_soundex = get_soundex(search_query)
+    model = SentenceTransformer('all-MiniLM-L6-v2')
+    targetSoundex = getSoundex(searchQuery)  #set our target word
     
     try:
-        driver.get('https://www.amazon.com.tr/')  
+        driver.get('https://www.amazon.com.tr/')      #enter the target link 
 
         try:
-            search_box = WebDriverWait(driver, 10).until(
+            searchBox = WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.ID, 'twotabsearchtextbox'))
-            )
-            search_box.send_keys(search_query)
-            search_box.send_keys(Keys.RETURN)
+            )   #fint search box
+            searchBox.send_keys(searchQuery)      #enter our search quary
+            searchBox.send_keys(Keys.RETURN)       #press enter
         except Exception as e:
             print("Arama kutusu bulunamadı veya bir hata oluştu:", e)
 
-        time.sleep(5)
+        time.sleep(5)   #wait for the page
         
-        soup = BeautifulSoup(driver.page_source, 'lxml')
-        urunler = soup.find_all("div", attrs={"class": "s-main-slot"})
-        isim_unutma = "a"
-        search_query = search_query.lower()
-        df = pd.DataFrame(columns=['Ürün Adı', 'Fiyat'])
-        isimler = []
-        min_price_info = 99999999
-        search_query = search_query.lower()
-        query_words = search_query.split()  # Arama kelimelerini ayırıyoruz
+        #take the source of the page and start processing it with BeautifulSoup
+        soup = BeautifulSoup(driver.page_source, 'lxml')    
+        products = soup.find_all("div", attrs={"class": "s-main-slot"})
+        nameSave = "a"      #create a variable for temp name 
+        searchQuery = searchQuery.lower()   #make all cases lower
+        names = []      #list for names
+        minPriceInfo = 99999999     #SET FIRST PRICE 
+        queryWords = searchQuery.split()  # Split the search quary
+        minimumURL = ""
 
-        urun_sayaci = 0
-        max_urun_sayisi = 10  
+        procductCount = 0           #create the count variables
+        maxProcductNumber = 10  
 
-        for urun in urunler:
-            if urun_sayaci >= max_urun_sayisi:
+        for product in products:
+            if procductCount >= maxProcductNumber:      #check the count
                 break
-            
-            urun_link = urun.find("div", class_= "a-section a-spacing-none")
-            #print(urun_link)
-            urun_linkleri = urun_link.find_all("a", attrs={"class": "a-link-normal"})
-            
-            for a_tag in urun_linkleri:
-                link_devam = a_tag.get("href")
-                if link_devam:
-                    try:
-                        detay = requests.get(link_devam)
-                        #print(detay)
-                        #print(link_devam)
-                        detay_soup = BeautifulSoup(detay.text, "html.parser")
 
-                        title = detay_soup.find(id='productTitle')
+            #find the top placed products
+            productLink = product.find("div", class_= "a-section a-spacing-none")
+            productLinks = productLink.find_all("a", attrs={"class": "a-link-normal"})
+            
+            for a_tag in productLinks:
+                ourURL = a_tag.get("href")      #get the link
+                if ourURL:
+                    try:   
+                        detail = requests.get(ourURL)       #get new page source code and start processing
+                        detailSoup = BeautifulSoup(detail.text, "html.parser")
+
+                        title = detailSoup.find(id='productTitle')  #find the products name 
                         if title:
-                            title_text = title.get_text(strip=True)
+                            titleText = title.get_text(strip=True)
                         else:
-                            title_text = "Ürün ismi bulunamadı"
+                            titleText = "Ürün ismi bulunamadı"
 
-                        price = detay_soup.find('span', {'class': 'a-price-whole'})
+                        #fint the products price
+                        price = detailSoup.find('span', {'class': 'a-price-whole'})
                         if price:
-                            price_text = price.get_text(strip=True)
+                            priceText = price.get_text(strip=True)
                         else:
-                            price = detay_soup.find('span', {'class': 'a-price'})
+                            price = detailSoup.find('span', {'class': 'a-price'})
                             if price:
-                                price_text = price.get_text(strip=True)
+                                priceText = price.get_text(strip=True)
                             else:
-                                price_text = "Fiyat bulunamadı"
+                                priceText = "Fiyat bulunamadı"
                         
-                        if price_text != "Fiyat bulunamadı":
-                            price_text = price_text.replace(",", ".") + " TL"  
+                        if priceText != "Fiyat bulunamadı":
+                            priceText = priceText.replace(",", ".") + " TL"  #organize the price value
                         
-                        if title_text != isim_unutma and isim_ayikla(title_text, isimler) and price_text != "Fiyat bulunamadı":
-                            product_name_lower = title_text.lower()
-                            if soundex_similarity(get_soundex(title_text), target_soundex):
-                                print(f"Ürün İsmi: {title_text}")
-                                print(f"Ürün Fiyatı: {price_text}\n")
-                                price_text = price_text.replace(" TL", "").replace(",", ".")
-                                price_text = float(price_text)
-                                if price_text <= min_price_info:
-                                    min_price_info = price_text
+                        #check all possibilities and if OK, continue
+                        if titleText != nameSave and extractName(titleText, names) and priceText != "Fiyat bulunamadı":
+                            productNameLower = titleText.lower()
+                            if soundexSimilarity(getSoundex(titleText), targetSoundex):    #check similarity
+                                print(f"Ürün İsmi: {titleText}")        #print prices
+                                print(f"Ürün Fiyatı: {priceText}\n")
+                                priceText = priceText.replace(" TL", "").replace(",", ".")  #organize the price value
+                                priceText = float(priceText)
+                                if priceText <= minPriceInfo:
+                                    minPriceInfo = priceText
+                                    minimumURL = titleText       #set new minimum price and URL
 
-                                isim_unutma = title_text
-
-                        if isim_unutma != "Ürün ismi bulunamadı":
-                            isim_unutma = title_text
+                                isimUnutma = titleText
+                        #set the name 
+                        if isimUnutma != "Ürün ismi bulunamadı":
+                            isimUnutma = titleText  
                        
                     except Exception as e:
                         continue
 
         WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, ".s-main-slot"))
-        )
+        )   #enter main products class
 
-        urun_sayaci = 0
-        max_urun_sayisi = 5 
+        procductCount = 0           #create the count variables
+        maxProcductNumber = 10  
 
-        while urun_sayaci < max_urun_sayisi:
+        while procductCount < maxProcductNumber:
+            #get new page source code and start processing
             soup = BeautifulSoup(driver.page_source, 'lxml')
-            urunler = soup.find("div", class_="s-main-slot")
-            urun_linkleri = urunler.find_all("a", attrs={"class": "a-link-normal"})
+            products = soup.find("div", class_="s-main-slot")
+            productLinks = products.find_all("a", attrs={"class": "a-link-normal"})
 
-            for a_tag in urun_linkleri:
-                link_devam = a_tag.get("href")
-                if link_devam and urun_sayaci < max_urun_sayisi:
-                    link_ekle = "https://www.amazon.com.tr/" + link_devam
+            for a_tag in productLinks:
+                semiLink = a_tag.get("href")    #fint the products link
+                if semiLink and procductCount < maxProcductNumber:
+                    newLink = "https://www.amazon.com.tr/" + semiLink   #create a useful link
                     try:
-                        detay = requests.get(link_ekle)
-                        #print(link_ekle)
-                        #print(detay)
-                        detay_soup = BeautifulSoup(detay.text, "html.parser")
-
-                        title = detay_soup.find(id='productTitle')
+                        detail = requests.get(newLink)  #get new pages source code and start processing
+                        detailSoup = BeautifulSoup(detail.text, "html.parser")
+                        
+                        #find product name
+                        title = detailSoup.find(id='productTitle')
                         if title:
-                            title_text = title.get_text(strip=True)
+                            titleText = title.get_text(strip=True)
                         else:
-                            title_text = "Ürün ismi bulunamadı"
+                            titleText = "Ürün ismi bulunamadı"
 
-                        price = detay_soup.find('span', {'class': 'a-price-whole'})
+                        #find product price
+                        price = detailSoup.find('span', {'class': 'a-price-whole'})
                         if price:
-                            price_text = price.get_text(strip=True)
+                            priceText = price.get_text(strip=True)
                         else:
-                            price = detay_soup.find('span', {'class': 'a-price'})
+                            price = detailSoup.find('span', {'class': 'a-price'})
                             if price:
-                                price_text = price.get_text(strip=True)
+                                priceText = price.get_text(strip=True)
                             else:
-                                price_text = "Fiyat bulunamadı"
+                                priceText = "Fiyat bulunamadı"
                             
-                        if price_text != "Fiyat bulunamadı":
-                            price_text = price_text.replace(",", "") + " TL"  
-                        if title_text != "Ürün ismi bulunamadı" and isim_ayikla(title_text, isimler):
-                            product_name_lower = title_text.lower()
-                            if soundex_similarity(get_soundex(title_text), target_soundex):
-                                print(f"Ürün İsmi: {title_text}")
-                                print(f"Ürün Fiyatı: {price_text}\n")
-                                price_text = price_text.replace(" TL", "").replace(",", ".")
-                                price_text = float(price_text)
-                                if price_text <= min_price_info:
-                                    min_price_info = price_text
-                                urun_sayaci += 1
+                        if priceText != "Fiyat bulunamadı":
+                            priceText = priceText.replace(",", "") + " TL"  #organize the price value
+
+                        #check all possibilities and if OK, continue
+                        if titleText != "Ürün ismi bulunamadı" and extractName(titleText, names):
+                            product_name_lower = titleText.lower()
+                            query_embedding = model.encode(searchQuery, convert_to_tensor=True)
+                            product_embeddings = model.encode(titleText, convert_to_tensor=True)
+                            cosine_score = util.pytorch_cos_sim(query_embedding, product_embeddings)
+                            if soundexSimilarity(getSoundex(titleText), targetSoundex) and cosine_score.item() >=  0.70:     #check similarity
+                                print(f"Ürün İsmi: {titleText}")
+                                print(f"Ürün Fiyatı: {priceText}\n")
+                                priceText = priceText.replace(" TL", "").replace(",", ".")  #organize the price value
+                                priceText = float(priceText)
+                                if priceText <= minPriceInfo:
+                                    minPriceInfo = priceText
+                                    minimumURL = titleText        #set new minimum price and URL
+                                procductCount += 1
                         
                     except Exception as e:
                         print(f"Detay sayfasına erişim başarısız: {e}")
 
-            if urun_sayaci >= max_urun_sayisi:
-                break
+            if procductCount >= maxProcductNumber:
+                break       #check the count values
         
-        driver.quit()
+        driver.quit()       #close the webdriver
     except Exception as e:
         print("Hata oluştu:", e)
     finally:
-        if min_price_info == 999999999:
-            return 0
+        if minPriceInfo == 999999999:
+            return 0                  #return the minimum price and if there is no price return 0  
         else:
-            return min_price_info
+            return minPriceInfo, minimumURL
